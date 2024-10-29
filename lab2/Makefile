@@ -3,7 +3,7 @@
 CC = g++
 CFLAGS = -Wall -pthread
 TARGET = sched_demo_313551118
-SOURCES = test.cpp
+SOURCES = sched_demo_313551118.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 
 all: $(TARGET)
