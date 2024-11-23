@@ -1,104 +1,94 @@
+/*
+ * kfetch.c: user-space program for interacting with kfetch kernel module
+ * by Cycatz <cycatz@staque.xyz>, 2022
+ * License: GPLv3
+ */
+
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <string.h>
-#include <errno.h>
+
 #include "kfetch.h"
 
-#define DEVICE_PATH "/dev/kfetch"
-#define BUFFER_SIZE 1024  // 和 kfech_buf 相同
+#define err_quit(msg)       \
+    do {                    \
+        perror(msg);        \
+        exit(EXIT_FAILURE); \
+    } while (0)
 
-void print_usage(const char *prog_name) {
-    printf("Usage:\n");
-    printf("    %s [options]\n", prog_name);
-    printf("Options:\n");
-    printf("    -a  Show all information\n");
-    printf("    -c  Show CPU model name\n");
-    printf("    -m  Show memory information\n");
-    printf("    -n  Show the number of CPU cores\n");
-    printf("    -p  Show the number of processes\n");
-    printf("    -r  Show the kernel release information\n");
-    printf("    -u  Show how long the system has been running\n");
+void kfetch_set_info(int fd, int mask)
+{
+    int len;
+    len = write(fd, &mask, sizeof(mask));
+    if (len < 0)
+        err_quit("write");
 }
 
-int main(int argc, char *argv[]) {
-    int opt;
-    int info_mask;
+void kfetch_print_info(int fd)
+{
+    int len;
+    char buf[KFETCH_BUF_SIZE];
+
+    len = read(fd, buf, 1);
+    if (len < 0)
+        err_quit("read");
+    buf[len] = '\0';
+    printf("%s\n", buf);
+}
+
+void usage(const char *progname)
+{
+    fprintf(stderr,
+            "Usage:\n"
+            "\t%s [options]\n",
+            progname);
+    fprintf(stderr,
+            "Options:\n"
+            "\t-a  Show all information\n"
+            "\t-c  Show CPU model name \n"
+            "\t-m  Show memory information\n"
+            "\t-n  Show the number of CPU cores\n"
+            "\t-p  Show the number of processes\n"
+            "\t-r  Show the kernel release information\n"
+            "\t-u  Show how long the system has been running\n");
+}
+
+int main(int argc, char *argv[])
+{
     int fd;
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
+    int opt;
+    int mask_info;
 
-    info_mask = -1;
-    while ((opt = getopt(argc, argv, "acmnpruh")) != -1) {
-        // printf("opt = %c \n", opt); // 打印有效選項
-        if (info_mask < 0)
-            info_mask = 0;
+    mask_info = -1;
+    while ((opt = getopt(argc, argv, "acnmpruh")) != -1) {
+        if (mask_info < 0)
+            mask_info = 0;
         switch (opt) {
-            case 'a':
-                info_mask = KFETCH_FULL_INFO; // 全部信息
-                break;
-            case 'c':
-                info_mask |= KFETCH_CPU_MODEL; // CPU 型號
-                break;
-            case 'm':
-                info_mask |= KFETCH_MEM; // 記憶體
-                break;
-            case 'n':
-                info_mask |= KFETCH_NUM_CPUS; // CPU 核心數量
-                break;
-            case 'p':
-                info_mask |= KFETCH_NUM_PROCS; // 進程數量
-                break;
-            case 'r':
-                info_mask |= KFETCH_RELEASE; // 核心版本
-                break;
-            case 'u':
-                info_mask |= KFETCH_UPTIME; // 運行時間
-                break;
-            case 'h':
-                print_usage(argv[0]);
-                return EXIT_SUCCESS;
+        case 'a': mask_info = KFETCH_FULL_INFO; break;
+        case 'c': mask_info |= KFETCH_CPU_MODEL; break;
+        case 'm': mask_info |= KFETCH_MEM; break;
+        case 'n': mask_info |= KFETCH_NUM_CPUS; break;
+        case 'p': mask_info |= KFETCH_NUM_PROCS; break;
+        case 'r': mask_info |= KFETCH_RELEASE; break;
+        case 'u': mask_info |= KFETCH_UPTIME; break;
+        case 'h': usage(*argv); exit(EXIT_SUCCESS);
+        case '?':
+            fprintf(stderr, "Unknown option: %c\n", optopt);
+            usage(*argv);
+            exit(EXIT_FAILURE);
+        case ':':
+            fprintf(stderr, "Missing arg for %c\n", optopt);
+            usage(*argv);
+            exit(EXIT_FAILURE);
         }
     }
 
+    fd = open(KFETCH_DEV_PATH, O_RDWR);
+    if (fd < 0)
+        err_quit("open");
 
-    // 寫入信息掩碼
-    if (info_mask > 0x3F) {
-        fprintf(stderr, "Invalid info_mask value: 0x%x\n", info_mask);
-        return EXIT_FAILURE;
-    }
-
-    // 打開字符設備
-    fd = open(DEVICE_PATH, O_RDWR);
-    if (fd < 0) {
-        perror("Failed to open device");
-        return EXIT_FAILURE;
-    }
-
-    // printf("info_mask befor write = %d \n",info_mask);
-
-    // 如果沒有帶參數，就不更新 module 中的 kfetch_mask
-    if(info_mask != -1){
-        if (write(fd, &info_mask, sizeof(info_mask)) < 0) {
-            perror("Failed to write to device");
-            close(fd);
-            return EXIT_FAILURE;
-        }
-    }
-   
-
-    // 從設備讀取信息
-    bytes_read = read(fd, buffer, 1);
-    if (bytes_read < 0) {
-        perror("Failed to read from device");
-        close(fd);
-        return EXIT_FAILURE;
-    }
-
-    buffer[bytes_read] = '\0'; // 確保字串結尾
-    printf("%s\n", buffer);
-
-    close(fd);
-    return EXIT_SUCCESS;
+    if (mask_info != -1)
+        kfetch_set_info(fd, mask_info);
+    kfetch_print_info(fd);
 }
