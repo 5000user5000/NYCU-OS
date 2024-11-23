@@ -1,23 +1,28 @@
-obj-m += kfetch.o
+obj-m += kfetch_mod_313551118.o
 
 # Kernel build directory
 KDIR := /lib/modules/$(shell uname -r)/build
 
-# Phony targets for cleaning, loading, and unloading
-.PHONY: all clean load unload
+# Phony targets
+.PHONY: all clean load unload test
 
-# Default target: build the module
 all:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	gcc -o kfetch kfetch.c
 
-# Clean target: remove built files
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	rm -f kfetch
 
-# Load target: insert the kernel module
 load: all
-	sudo insmod kfetch.ko
+	sudo insmod kfetch_mod_313551118.ko
 
-# Unload target: remove the kernel module
 unload:
-	sudo rmmod kfetch
+	sudo rmmod kfetch_mod_313551118
+
+test: load
+	sudo ./kfetch -h
+	sudo ./kfetch -a
+	sudo ./kfetch -c -m
+	sudo ./kfetch -n -p
+	sudo ./kfetch -r -u
