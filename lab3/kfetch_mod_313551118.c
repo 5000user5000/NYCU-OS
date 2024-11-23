@@ -193,6 +193,7 @@ static ssize_t kfetch_read(struct file *file, char __user *buffer, size_t len, l
                 j++;
                 break;
             }
+            j++;
         }
         strcat(kfetch_buf, "\n");
     }
