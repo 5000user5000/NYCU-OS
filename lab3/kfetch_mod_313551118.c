@@ -25,11 +25,13 @@
 #define KFETCH_NUM_PROCS (1 << 5) // Number of processes
 #define KFETCH_FULL_INFO ((1 << KFETCH_NUM_INFO) - 1)
 
+#define KFETCH_BUF_SIZE 1024 /* Max length of the message from the device */
+
 // 全域變數
 static dev_t dev_number;
 static struct cdev kfetch_cdev;
 static struct class *kfetch_class;
-static char kfetch_buf[1024]; // 用來存儲返回給使用者的資訊
+static char kfetch_buf[KFETCH_BUF_SIZE]; // 用來存儲返回給使用者的資訊
 static int kfetch_mask = 0; // 會記住當前 mask 的訊息 <包含之前的，如果沒有帶參數修改的話>
 
 // 定義互斥鎖
@@ -81,9 +83,11 @@ static ssize_t kfetch_read(struct file *file, char __user *buffer, size_t len, l
     unsigned long totalram, freeram;
     int process_count = 0;
     char split_line[50];
-    char info_list[8][64];
-    bool contain_info[8] = {true, true, false, false, false, false, false, false};
-    char data_buf[64] = {0}; // 用來暫存資料
+    // char info_list[8][64];
+    // bool contain_info[8] = {true, true, false, false, false, false, false, false};
+    // char data_buf[64] = {0}; // 用來暫存資料
+    char info_lines[8][64];
+    int info_count = 0;
     int sl_idx = 0;
     struct task_struct *task;
 
@@ -129,73 +133,45 @@ static ssize_t kfetch_read(struct file *file, char __user *buffer, size_t len, l
 
 
     // ---------   start to combine info  ---------   
-    // host name
-    strcpy(info_list[0], hostname);
+    // Line 0: Hostname
+    snprintf(info_lines[info_count++], sizeof(info_lines[0]), "%s", hostname);
 
-    // 分隔線
-    strcpy(info_list[1], split_line);
+    // Line 1: Separator line
+    snprintf(info_lines[info_count++], sizeof(info_lines[0]), "%s", split_line);
 
-    // Kernel version
+     // Add information based on the kfetch_mask
     if (kfetch_mask & KFETCH_RELEASE) {
-        contain_info[2] = true;
-        sprintf(data_buf, "\033[1;33mKernal:\033[1;0m %s", kernel_ver);
-        strcpy(info_list[2], data_buf);
+        snprintf(info_lines[info_count++], sizeof(info_lines[0]), "\033[1;33mKernel:\033[1;0m %s", kernel_ver);
     }
-    
-    // CPU model
     if (kfetch_mask & KFETCH_CPU_MODEL) {
-        printk(KERN_INFO "info for cpu model\n");
-        contain_info[3] = true;
-        sprintf(data_buf, "\033[1;33mCPU:\033[1;0m    %s",cpu_model);
-        strcpy(info_list[3], data_buf);
-        printk(KERN_INFO "info for cpu model = %s\n",info_list[3]);
+        snprintf(info_lines[info_count++], sizeof(info_lines[0]), "\033[1;33mCPU:\033[1;0m    %s", cpu_model);
     }
-
-    // CPU cores
     if (kfetch_mask & KFETCH_NUM_CPUS) {
-        contain_info[4] = true;
-        sprintf(data_buf, "\033[1;33mCPUs:\033[1;0m   %d / %d", online_cpus, total_cpus); 
-        strcpy(info_list[4], data_buf);
+        snprintf(info_lines[info_count++], sizeof(info_lines[0]), "\033[1;33mCPUs:\033[1;0m   %d / %d", online_cpus, total_cpus);
     }
-
-    // Memory information
     if (kfetch_mask & KFETCH_MEM) {
-        contain_info[5] = true;
-        sprintf(data_buf, "\033[1;33mMem:\033[1;0m    %ld / %ld MB", freeram, totalram);
-        strcpy(info_list[5], data_buf);
+        snprintf(info_lines[info_count++], sizeof(info_lines[0]), "\033[1;33mMem:\033[1;0m    %lu / %lu MB", freeram, totalram);
     }
-
-    
-    // Number of processes
     if (kfetch_mask & KFETCH_NUM_PROCS) {
-        contain_info[6] = true;
-        sprintf(data_buf, "\033[1;33mProcs:\033[1;0m  %d", process_count);
-        strcpy(info_list[6], data_buf);
+        snprintf(info_lines[info_count++], sizeof(info_lines[0]), "\033[1;33mProcs:\033[1;0m  %d", process_count);
     }
-
-
-    // Uptime
     if (kfetch_mask & KFETCH_UPTIME) {
-        contain_info[7] = true;
-        sprintf(data_buf, "\033[1;33mUptime:\033[1;0m %ld mins", uptime_mins);
-        strcpy(info_list[7], data_buf);
+        snprintf(info_lines[info_count++], sizeof(info_lines[0]), "\033[1;33mUptime:\033[1;0m %ld mins", uptime_mins);
     }
 
     // write to kfetch buf
     strcpy(kfetch_buf, "");
-    for (int i = 0 , j = 0 ; i < 8; i++) {
-        strcat(kfetch_buf, logo[i]);
+    for (int i = 0 ; i < 8; i++) {
+        // Append the logo line
+        strlcat(kfetch_buf, logo[i], sizeof(kfetch_buf));
 
-        // 尋找第一筆數據 <一定要加 while>
-        while (j < 8) {
-            if(contain_info[j]) {
-                strcat(kfetch_buf, info_list[j]);
-                j++;
-                break;
-            }
-            j++;
+        // Append the corresponding info line if available
+        if (i < info_count) {
+            strlcat(kfetch_buf, info_lines[i], sizeof(kfetch_buf));
         }
-        strcat(kfetch_buf, "\n");
+
+        // Add a newline character
+        strlcat(kfetch_buf, "\n", sizeof(kfetch_buf));
     }
 
     // 複製資料到使用者空間
@@ -204,7 +180,6 @@ static ssize_t kfetch_read(struct file *file, char __user *buffer, size_t len, l
         mutex_unlock(&kfetch_mutex);
         return -EFAULT;
     }
-
 
     // 解鎖
     mutex_unlock(&kfetch_mutex);
